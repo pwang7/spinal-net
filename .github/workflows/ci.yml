@@ -12,10 +12,18 @@ jobs:
       - uses: olafurpg/setup-scala@v10
         with:
           java-version: adopt@1.11
+      - name: Check out Spinal-CocotbLib code
+        uses: actions/checkout@v2
+        with:
+          repository: SpinalHDL/CocotbLib
+          path: ./SpinalNet/test/src/python/cocotblib
       - name: Run
         run: |
           sudo apt-get update
-          sudo apt-get install -y verilator
+          sudo apt-get install -y iverilog verilator
+          # Local install Cocotb and set PATH env
+          pip3 install cocotb
+          export PATH="$HOME/.local/bin:$PATH"
           ./run.sh
       - name: Setup tmate session
         if: ${{ failure() }}
