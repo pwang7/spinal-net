@@ -18,6 +18,7 @@ fi
 
 
 # Run test and simulation
+./mill SpinalNet.test.testOnly sdram.SdramControllerTest
 ./mill SpinalNet.test.testOnly udp.UdpTest
 
 # E2E UDP test

@@ -21,6 +21,13 @@ trait CommonSpinalModule extends ScalaModule with ScalafmtModule with ScalafixMo
 
 
 object SpinalNet extends CommonSpinalModule {
+  object test extends Tests with TestModule.ScalaTest {
+    def ivyDeps = Agg(ivy"org.scalatest::scalatest:3.2.2")
+    def testOnly(args: String*) = T.command {
+      super.runMain("org.scalatest.run", args: _*)
+    }
+  }
+/*
   object test extends Tests {
     def ivyDeps = Agg(
       ivy"org.scalatest::scalatest:3.2.2",
@@ -31,4 +38,5 @@ object SpinalNet extends CommonSpinalModule {
       super.runMain("org.scalatest.run", args: _*)
     }
   }
+*/
 }
