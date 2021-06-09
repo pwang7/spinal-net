@@ -1,19 +1,34 @@
 
 module tb_sdram_controller (
-  input               io_bus_cmd_valid,
-  output              io_bus_cmd_ready,
-  input      [23:0]   io_bus_cmd_payload_address,
-  input               io_bus_cmd_payload_write,
-  input      [15:0]   io_bus_cmd_payload_data,
-  input      [2:0]    io_bus_cmd_payload_burstLen,
-  input      [1:0]    io_bus_cmd_payload_mask,
-  input      [3:0]    io_bus_cmd_payload_opId,
-  input               io_bus_cmd_payload_last,
-  output              io_bus_rsp_valid,
-  input               io_bus_rsp_ready,
-  output     [15:0]   io_bus_rsp_payload_data,
-  output     [3:0]    io_bus_rsp_payload_opId,
-  output              io_bus_rsp_payload_last,
+  input               io_axi_aw_valid,
+  output              io_axi_aw_ready,
+  input      [31:0]   io_axi_aw_payload_addr,
+  input      [3:0]    io_axi_aw_payload_id,
+  input      [7:0]    io_axi_aw_payload_len,
+  input      [2:0]    io_axi_aw_payload_size,
+  input      [1:0]    io_axi_aw_payload_burst,
+  input               io_axi_w_valid,
+  output              io_axi_w_ready,
+  input      [15:0]   io_axi_w_payload_data,
+  input      [1:0]    io_axi_w_payload_strb,
+  input               io_axi_w_payload_last,
+  output              io_axi_b_valid,
+  input               io_axi_b_ready,
+  output     [3:0]    io_axi_b_payload_id,
+  output     [1:0]    io_axi_b_payload_resp,
+  input               io_axi_ar_valid,
+  output              io_axi_ar_ready,
+  input      [31:0]   io_axi_ar_payload_addr,
+  input      [3:0]    io_axi_ar_payload_id,
+  input      [7:0]    io_axi_ar_payload_len,
+  input      [2:0]    io_axi_ar_payload_size,
+  input      [1:0]    io_axi_ar_payload_burst,
+  output              io_axi_r_valid,
+  input               io_axi_r_ready,
+  output     [15:0]   io_axi_r_payload_data,
+  output     [3:0]    io_axi_r_payload_id,
+  output     [1:0]    io_axi_r_payload_resp,
+  output              io_axi_r_payload_last,
   output              io_initDone,
   input               clk,
   input               reset
@@ -36,20 +51,35 @@ module tb_sdram_controller (
   wire       [15:0]   sdramDevice_DQ_read;
 
   SdramController controller (
-    .io_bus_cmd_valid               (io_bus_cmd_valid                          ), //i
-    .io_bus_cmd_ready               (controller_io_bus_cmd_ready               ), //o
-    .io_bus_cmd_payload_address     (io_bus_cmd_payload_address[23:0]          ), //i
-    .io_bus_cmd_payload_write       (io_bus_cmd_payload_write                  ), //i
-    .io_bus_cmd_payload_data        (io_bus_cmd_payload_data[15:0]             ), //i
-    .io_bus_cmd_payload_burstLen    (io_bus_cmd_payload_burstLen[2:0]          ), //i
-    .io_bus_cmd_payload_mask        (io_bus_cmd_payload_mask[1:0]              ), //i
-    .io_bus_cmd_payload_opId        (io_bus_cmd_payload_opId[3:0]              ), //i
-    .io_bus_cmd_payload_last        (io_bus_cmd_payload_last                   ), //i
-    .io_bus_rsp_valid               (controller_io_bus_rsp_valid               ), //o
-    .io_bus_rsp_ready               (io_bus_rsp_ready                          ), //i
-    .io_bus_rsp_payload_data        (controller_io_bus_rsp_payload_data[15:0]  ), //o
-    .io_bus_rsp_payload_opId        (controller_io_bus_rsp_payload_opId[3:0]   ), //o
-    .io_bus_rsp_payload_last        (controller_io_bus_rsp_payload_last        ), //o
+    .io_axi_aw_valid                (io_axi_aw_valid                           ), //
+    .io_axi_aw_ready                (io_axi_aw_ready                           ), //
+    .io_axi_aw_payload_addr         (io_axi_aw_payload_addr                    ), //
+    .io_axi_aw_payload_id           (io_axi_aw_payload_id                      ), //
+    .io_axi_aw_payload_len          (io_axi_aw_payload_len                     ), //
+    .io_axi_aw_payload_size         (io_axi_aw_payload_size                    ), //
+    .io_axi_aw_payload_burst        (io_axi_aw_payload_burst                   ), //
+    .io_axi_w_valid                 (io_axi_w_valid                            ), //
+    .io_axi_w_ready                 (io_axi_w_ready                            ), //
+    .io_axi_w_payload_data          (io_axi_w_payload_data                     ), //
+    .io_axi_w_payload_strb          (io_axi_w_payload_strb                     ), //
+    .io_axi_w_payload_last          (io_axi_w_payload_last                     ), //
+    .io_axi_b_valid                 (io_axi_b_valid                            ), //
+    .io_axi_b_ready                 (io_axi_b_ready                            ), //
+    .io_axi_b_payload_id            (io_axi_b_payload_id                       ), //
+    .io_axi_b_payload_resp          (io_axi_b_payload_resp                     ), //
+    .io_axi_ar_valid                (io_axi_ar_valid                           ), //
+    .io_axi_ar_ready                (io_axi_ar_ready                           ), //
+    .io_axi_ar_payload_addr         (io_axi_ar_payload_addr                    ), //
+    .io_axi_ar_payload_id           (io_axi_ar_payload_id                      ), //
+    .io_axi_ar_payload_len          (io_axi_ar_payload_len                     ), //
+    .io_axi_ar_payload_size         (io_axi_ar_payload_size                    ), //
+    .io_axi_ar_payload_burst        (io_axi_ar_payload_burst                   ), //
+    .io_axi_r_valid                 (io_axi_r_valid                            ), //
+    .io_axi_r_ready                 (io_axi_r_ready                            ), //
+    .io_axi_r_payload_data          (io_axi_r_payload_data                     ), //
+    .io_axi_r_payload_id            (io_axi_r_payload_id                       ), //
+    .io_axi_r_payload_resp          (io_axi_r_payload_resp                     ), //
+    .io_axi_r_payload_last          (io_axi_r_payload_last                     ), //
     .io_sdram_ADDR                  (controller_io_sdram_ADDR[12:0]            ), //o
     .io_sdram_BA                    (controller_io_sdram_BA[1:0]               ), //o
     .io_sdram_DQ_read               (sdramDevice_DQ_read[15:0]                 ), //i

@@ -7,9 +7,9 @@ TOPLEVEL=tb_sdram_controller
 MODULE=SdramControllerTest
 
 # Python path to cocotblib
-export PYTHONPATH:=..
-export COCOTB_RESOLVE_X:=ZEROS
-export COCOTB_LOG_LEVEL := DEBUG
-export COCOTB_SCHEDULER_DEBUG := 1
+export PYTHONPATH := ..
+export COCOTB_RESOLVE_X := ZEROS
+#export COCOTB_LOG_LEVEL := DEBUG
+#export COCOTB_SCHEDULER_DEBUG := 1
 include $(shell cocotb-config --makefiles)/Makefile.sim
 #include ../common/Makefile.sim

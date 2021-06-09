@@ -10,39 +10,32 @@ import spinal.lib.memory.sdram._
 import spinal.lib.memory.sdram.sdr.{MT48LC16M16A2, SdramTimings, SdramInterface}
 
 case class SdramConfig(
+    l: SdramLayout,
     CAS: Int = 3,
-    burstLen: Int = 8,
+    addressWidth: Int = 32,
+    burstLen: Int = 16,
     idWidth: Int = 4
 ) {
-  val burstLenWidth = log2Up(burstLen)
-}
+  val busByteSize = l.dataWidth / 8
+  val burstLenWidth = log2Up(burstLen) // 8
+  val burstByteSize = burstLen * busByteSize
+  val fullStrbBits = scala.math.pow(2, busByteSize).toInt - 1 // all bits valid
+  val bufDepth = burstLen * 4
 
-case class SdramCmd(l: SdramLayout, c: SdramConfig) extends Bundle {
-  val address = Bits(l.wordAddressWidth bits)
-  val write = Bool
-  val data = Bits(l.dataWidth bits)
-  val burstLen = UInt(c.burstLenWidth bits)
-  val mask = Bits(l.bytePerWord bits)
-  val opId = UInt(c.idWidth bits)
-  val last = Bool
-}
+  require(l.dataWidth % 8 == 0, s"${l.dataWidth} % 8 == 0 assert failed")
+  require(burstLen <= 256, s"$burstLen < 256 assert failed")
 
-case class SdramRsp(l: SdramLayout, c: SdramConfig) extends Bundle {
-  val data = Bits(l.dataWidth bits)
-  val opId = UInt(c.idWidth bits)
-  val last = Bool
-}
-
-case class SdramBus(l: SdramLayout, c: SdramConfig)
-    extends Bundle
-    with IMasterSlave {
-  val cmd = Stream(SdramCmd(l, c))
-  val rsp = Stream(SdramRsp(l, c))
-
-  override def asMaster(): Unit = {
-    master(cmd)
-    slave(rsp)
-  }
+  val axiConfig = Axi4Config(
+    addressWidth = addressWidth,
+    dataWidth = l.dataWidth,
+    idWidth = idWidth,
+    useId = true,
+    useQos = false,
+    useRegion = false,
+    useLock = false,
+    useCache = false,
+    useProt = false
+  )
 }
 
 class SdramController(l: SdramLayout, t: SdramTimings, c: SdramConfig)
@@ -68,51 +61,79 @@ class SdramController(l: SdramLayout, t: SdramTimings, c: SdramConfig)
   val DQM_READ_DELAY_CYCLES = 2
 
   val MODE_VALUE =
-    B"6'b000_0_00" ## B(c.CAS, 3 bits) ## B"4'b0_111" // sequential full page
+    U"6'b000_0_00" @@ U(c.CAS, 3 bits) @@ U"4'b0_111" // sequential full page
   val ALL_BANK_ADDR = 1 << 10
 
   val io = new Bundle {
-    val bus = slave(SdramBus(l, c)) // setAsReg()
+    val axi = slave(Axi4(c.axiConfig))
     val sdram = master(SdramInterface(l)) // setAsReg
     val initDone = out Bool
 
-    bus.addAttribute(name = "IOB", value = "TRUE")
+    axi.addAttribute(name = "IOB", value = "TRUE")
     sdram.addAttribute(name = "IOB", value = "TRUE")
     initDone.addAttribute(name = "IOB", value = "TRUE")
   }
+  val awFifo = StreamFifo(Axi4Aw(c.axiConfig), c.bufDepth)
+  val wFifo = StreamFifo(Axi4W(c.axiConfig), c.bufDepth)
+  val bFifo = StreamFifo(Axi4B(c.axiConfig), c.bufDepth)
+  val arFifo = StreamFifo(Axi4Ar(c.axiConfig), c.bufDepth)
+  val rFifo = StreamFifo(Axi4R(c.axiConfig), c.bufDepth)
+  awFifo.io.push << io.axi.aw
+  wFifo.io.push << io.axi.w
+  io.axi.b << bFifo.io.pop
+  arFifo.io.push << io.axi.ar
+  io.axi.r << rFifo.io.pop
 
   val commandReg = Reg(Bits(4 bits)) init (0)
-  val addressReg = Reg(Bits(l.chipAddressWidth bits)) init (0)
-  val bankAddrReg = Reg(Bits(l.bankWidth bits)) init (0)
-  val rowAddrReg = Reg(Bits(l.rowWidth bits)) init (0)
-  val columnAddrReg = Reg(Bits(l.columnWidth bits)) init (0)
+  val addressReg = Reg(UInt(l.chipAddressWidth bits)) init (0)
+  val bankAddrReg = Reg(UInt(l.bankWidth bits)) init (0)
+  //val rowAddrReg = Reg(Bits(l.rowWidth bits)) init (0)
+  val burstLenReg = Reg(UInt(c.burstLenWidth bits)) init (0)
+  //val strobeReg = Reg(Bits(c.busByteSize bits)) init(0)
+  //val lastWriteReg = Reg(Bool) init(False)
+  val columnAddrReg = Reg(UInt(l.columnWidth bits)) init (0)
   val readDataReg = Reg(Bits(l.dataWidth bits)) init (0)
+  val readDataValidReg = Reg(Bool) init (False)
+  val readDataLastReg = Reg(Bool) init (False)
   val opIdReg = Reg(UInt(c.idWidth bits)) init (0)
+  val mask = Bits(l.bytePerWord bits)
 
-  io.sdram.BA := bankAddrReg
-  io.sdram.ADDR := addressReg
-  io.sdram.DQM := io.bus.cmd.valid ? (DQM_ALL_VALID | ~io.bus.cmd.mask) | DQM_ALL_INVALID
+  awFifo.io.pop.ready := False
+  wFifo.io.pop.ready := False
+  bFifo.io.push.valid := False
+  arFifo.io.pop.ready := False
+
+  bFifo.io.push.payload.id := opIdReg
+  bFifo.io.push.payload.setOKAY()
+  rFifo.io.push.payload.data := readDataReg
+  rFifo.io.push.payload.id := opIdReg
+  rFifo.io.push.payload.last := readDataLastReg
+  rFifo.io.push.payload.setOKAY()
+  rFifo.io.push.valid := readDataValidReg
+
+  io.sdram.BA := bankAddrReg.asBits
+  io.sdram.ADDR := addressReg.asBits
+  io.sdram.DQM := mask
   io.sdram.CKE := True
   io.sdram.CSn := commandReg(3)
   io.sdram.RASn := commandReg(2)
   io.sdram.CASn := commandReg(1)
   io.sdram.WEn := commandReg(0)
-
-  io.bus.rsp.data := readDataReg
-  io.bus.rsp.opId := opIdReg
-  io.bus.rsp.last := False
-  io.sdram.DQ.write := io.bus.cmd.data
-
+  io.sdram.DQ.write := wFifo.io.pop.payload.data
   io.initDone := False
 
-  val cmdReady = Bool
-  val rspValid = Bool
-  io.bus.cmd.ready := cmdReady
-  io.bus.rsp.valid := rspValid
+  commandReg := CMD_NOP
+  readDataLastReg := False
 
   assert(
-    assertion = (columnAddrReg.asUInt < l.columnSize - c.burstLen),
+    assertion = (columnAddrReg < l.columnSize - c.burstLen),
     message = "invalid column address and burst length",
+    severity = ERROR
+  )
+  assert(
+    assertion =
+      awFifo.io.pop.payload.isINCR() && arFifo.io.pop.payload.isINCR(),
+    message = "only burst type INCR allowed",
     severity = ERROR
   )
 
@@ -153,10 +174,11 @@ class SdramController(l: SdramLayout, t: SdramTimings, c: SdramConfig)
 
   val initPeriod = Bool
   val refreshReqReg = Reg(Bool) init (False)
-  val writeReq = Bool
-  val readReq = Bool
-
-  commandReg := CMD_NOP
+  val preReqIsWriteReg = Reg(Bool) init (False)
+  val readReq =
+    arFifo.io.pop.valid && arFifo.io.pop.payload.len <= rFifo.io.availability
+  val writeReq =
+    awFifo.io.pop.valid && awFifo.io.pop.payload.len <= wFifo.io.occupancy && bFifo.io.availability > 0
 
   val initFsm = new StateMachine {
     val INIT_WAIT: State = new State with EntryPoint {
@@ -244,13 +266,38 @@ class SdramController(l: SdramLayout, t: SdramTimings, c: SdramConfig)
   }
 
   val writeFsm = new StateMachine {
-    val BURST_WRITE: State = new State with EntryPoint {
+    val ACTIVE_WRITE: State = new State with EntryPoint {
+      onEntry {
+        commandReg := CMD_ACTIVE
+        bankAddrReg := awFifo.io.pop.payload
+          .addr(l.wordAddressWidth - l.bankWidth - 1, l.bankWidth bits)
+        addressReg := awFifo.io.pop.payload.addr(
+          (l.rowWidth + l.columnWidth - 1) downto l.columnWidth
+        ) // Row address
+        columnAddrReg := awFifo.io.pop.payload
+          .addr((l.columnWidth - 1) downto 0)
+          .resized // Colume address
+        opIdReg := awFifo.io.pop.payload.id
+        burstLenReg := awFifo.io.pop.payload.len.resized
+        stateCounter.setTime(t.tRCD)
+
+        awFifo.io.pop.ready := True // awFifo.io.pop.valid must be true here
+      } whenIsActive {
+        when(!stateCounter.busy) {
+          goto(BURST_WRITE)
+        }
+      }
+    }
+
+    val BURST_WRITE: State = new State {
       onEntry {
         addressReg := columnAddrReg.resized
         commandReg := CMD_WRITE
-        stateCounter.setCycles(io.bus.cmd.burstLen)
+        stateCounter.setCycles(burstLenReg)
       } whenIsActive {
-        when(!stateCounter.busy || io.bus.cmd.last) {
+        wFifo.io.pop.ready := True // wFifo.io.pop.valid must be true here
+
+        when(!stateCounter.busy || wFifo.io.pop.payload.last) {
           goto(TERM_WRITE)
         }
       }
@@ -260,13 +307,39 @@ class SdramController(l: SdramLayout, t: SdramTimings, c: SdramConfig)
       onEntry {
         commandReg := CMD_BURST_TERMINATE
       } whenIsActive {
-        exit()
+        exit() // Must be one cycle
+      } onExit {
+        preReqIsWriteReg := True
+        bFifo.io.push.valid := True // bFifo.io.push.ready must be true here
       }
     }
   }
 
   val readFsm = new StateMachine {
-    val SEND_READ_CMD: State = new State with EntryPoint {
+    val ACTIVE: State = new State with EntryPoint {
+      onEntry {
+        commandReg := CMD_ACTIVE
+        bankAddrReg := arFifo.io.pop.payload
+          .addr(l.wordAddressWidth - l.bankWidth - 1, l.bankWidth bits)
+        addressReg := arFifo.io.pop.payload.addr(
+          (l.rowWidth + l.columnWidth - 1) downto l.columnWidth
+        ) // Row address
+        columnAddrReg := arFifo.io.pop.payload
+          .addr((l.columnWidth - 1) downto 0)
+          .resized // Colume address
+        opIdReg := arFifo.io.pop.payload.id
+        burstLenReg := arFifo.io.pop.payload.len.resized
+        stateCounter.setTime(t.tRCD)
+
+        arFifo.io.pop.ready := True // arFifo.io.pop.valid must be true here
+      } whenIsActive {
+        when(!stateCounter.busy) {
+          goto(SEND_READ_CMD)
+        }
+      }
+    }
+
+    val SEND_READ_CMD: State = new State {
       onEntry {
         addressReg := columnAddrReg.resized
         commandReg := CMD_READ
@@ -280,7 +353,7 @@ class SdramController(l: SdramLayout, t: SdramTimings, c: SdramConfig)
 
     val BURST_READ: State = new State {
       onEntry {
-        stateCounter.setCycles(io.bus.cmd.burstLen)
+        stateCounter.setCycles(burstLenReg)
       } whenIsActive {
         when(stateCounter.counter === c.CAS) {
           commandReg := CMD_BURST_TERMINATE
@@ -288,7 +361,8 @@ class SdramController(l: SdramLayout, t: SdramTimings, c: SdramConfig)
           exit()
         }
       } onExit {
-        io.bus.rsp.last := True
+        preReqIsWriteReg := False
+        readDataLastReg := True
       }
     }
   }
@@ -306,8 +380,16 @@ class SdramController(l: SdramLayout, t: SdramTimings, c: SdramConfig)
       whenIsActive {
         when(refreshReqReg) {
           goto(REFRESH)
-        } elsewhen (writeReq || readReq) {
-          goto(ACTIVE)
+        } elsewhen (readReq && writeReq) {
+          when(preReqIsWriteReg) {
+            goto(READ)
+          } otherwise {
+            goto(WRITE)
+          }
+        } elsewhen (writeReq && !readReq) {
+          goto(WRITE)
+        } elsewhen (readReq && !writeReq) {
+          goto(READ)
         }
       }
     }
@@ -315,31 +397,6 @@ class SdramController(l: SdramLayout, t: SdramTimings, c: SdramConfig)
     val REFRESH: State = new StateFsm(refreshFsm) {
       whenCompleted {
         goto(IDLE)
-      }
-    }
-
-    val ACTIVE: State = new State {
-      onEntry {
-        addressReg := rowAddrReg
-        commandReg := CMD_ACTIVE
-        bankAddrReg := io.bus.cmd
-          .address(l.wordAddressWidth - l.bankWidth - 1, l.bankWidth bits)
-        rowAddrReg := io.bus.cmd.address(
-          (l.rowWidth + l.columnWidth - 1) downto l.columnWidth
-        ) // Row address
-        columnAddrReg := io.bus.cmd
-          .address((l.columnWidth - 1) downto 0)
-          .resized // Colume address
-        opIdReg := io.bus.cmd.opId
-        stateCounter.setTime(t.tRCD)
-      } whenIsActive {
-        when(!stateCounter.busy) {
-          when(writeReq) {
-            goto(WRITE)
-          } otherwise {
-            goto(READ)
-          }
-        }
       }
     }
 
@@ -364,6 +421,17 @@ class SdramController(l: SdramLayout, t: SdramTimings, c: SdramConfig)
     }
   }
 
+  initPeriod := fsm.isActive(fsm.INIT)
+
+  when(writeFsm.isActive(writeFsm.BURST_WRITE)) {
+    mask := DQM_ALL_VALID | ~wFifo.io.push.payload.strb
+  } elsewhen (fsm.isActive(fsm.READ)) {
+    mask := DQM_ALL_VALID
+  } otherwise {
+    mask := DQM_ALL_INVALID
+  }
+
+  // Handle SDRAM read
   val readArea = new ClockingArea(
     clockDomain = ClockDomain(
       clock = ClockDomain.current.clock,
@@ -375,17 +443,7 @@ class SdramController(l: SdramLayout, t: SdramTimings, c: SdramConfig)
   }
   readDataReg := readArea.readReg
 
-  val readDataValidReg =
-    RegNext(readFsm.isActive(readFsm.BURST_READ)) init (False)
-  initPeriod := fsm.isActive(fsm.INIT)
-  writeReq :=
-    io.bus.cmd.write && io.bus.cmd.valid
-  readReq :=
-    !io.bus.cmd.write && io.bus.cmd.valid
-  cmdReady := writeFsm.isActive(writeFsm.BURST_WRITE) || readFsm.isEntering(
-    readFsm.SEND_READ_CMD
-  )
-  rspValid := writeFsm.isActive(writeFsm.TERM_WRITE) || readDataValidReg
+  readDataValidReg := readFsm.isActive(readFsm.BURST_READ)
 
   when(!initPeriod && refreshCounter.willOverflow) {
     refreshReqReg := True
@@ -403,7 +461,11 @@ object SdramController {
     val device = MT48LC16M16A2
     SpinalConfig(defaultClockDomainFrequency = FixedFrequency(100 MHz))
       .generateVerilog(
-        new SdramController(device.layout, device.timingGrade7, SdramConfig())
+        new SdramController(
+          device.layout,
+          device.timingGrade7,
+          SdramConfig(device.layout)
+        )
       )
   }
 }

@@ -76,12 +76,12 @@ class SdramControllerTest extends AnyFunSuite {
   val device = MT48LC16M16A2
   val l = device.layout
   val t = device.timingGrade7
-  val c = SdramConfig()
+  val c = SdramConfig(l)
 
   test("sdram test") {
     val compiled = SimConfig
     .withWave
-    .withConfig(SpinalConfig(defaultClockDomainFrequency = FixedFrequency(166 MHz)))
+    .withConfig(SpinalConfig(defaultClockDomainFrequency = FixedFrequency(200 MHz)))
     .compile(new SdramController(l, t, c))
     assert(CocotbRunner("./SpinalNet/test/src/python/sdram_controller"), "Simulation faild")
     println("SUCCESS")
