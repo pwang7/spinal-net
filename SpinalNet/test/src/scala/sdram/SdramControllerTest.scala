@@ -76,7 +76,7 @@ class SdramControllerTest extends AnyFunSuite {
   val device = MT48LC16M16A2
   val l = device.layout
   val t = device.timingGrade7
-  val c = SdramConfig(l)
+  val c = SdramConfig()
 
   test("sdram test") {
     val compiled = SimConfig

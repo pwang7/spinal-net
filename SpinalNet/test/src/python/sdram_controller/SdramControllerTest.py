@@ -24,9 +24,6 @@ async def waitUntil(clk, cond):
 
 @cocotb.test()
 async def testFunc(dut):
-    # Handle value X
-    #cocotbXHack()
-
     cocotb.fork(ClockDomainAsyncResetCustom(dut.clk, dut.reset))
     cocotb.fork(simulationSpeedPrinter(dut.clk))
 
@@ -40,14 +37,22 @@ async def testFunc(dut):
     print("init done at: {}".format(utils.get_sim_time(units='ns')))
     dut.io_axi_b_ready  <= True
 
-    burstLen = 8
+    busDataWidth = 32
+    sdramDQWidth = 16
+    dataWidthMultipler = int(busDataWidth / sdramDQWidth) # AXI burst size in bytes
+    strobe = int(pow(2, pow(2, dataWidthMultipler)) - 1)
+    burstLen = 4
     rangeMax = 16
+    print("bus width = {}, SDRAM DQ width = {}, strobe = {}, burst length = {}".format(
+        busDataWidth, sdramDQWidth, strobe, burstLen
+    ))
+
     for i in range(rangeMax):
         dut.io_axi_aw_valid         <= True
-        dut.io_axi_aw_payload_addr  <= i * burstLen
+        dut.io_axi_aw_payload_addr  <= i * burstLen * dataWidthMultipler
         dut.io_axi_aw_payload_id    <= i
         dut.io_axi_aw_payload_len   <= burstLen
-        dut.io_axi_aw_payload_size  <= 1 # 2 bytes/16 bits
+        dut.io_axi_aw_payload_size  <= dataWidthMultipler
         dut.io_axi_aw_payload_burst <= 1 # INCR
         await RisingEdge(dut.clk)
         await waitUntil(dut.clk, lambda: (int(dut.io_axi_aw_valid) == 1 and int(dut.io_axi_aw_ready) == 1))
@@ -56,7 +61,7 @@ async def testFunc(dut):
         for d in range(burstLen):
             dut.io_axi_w_valid        <= True
             dut.io_axi_w_payload_data <= i * burstLen + d
-            dut.io_axi_w_payload_strb <= 3
+            dut.io_axi_w_payload_strb <= strobe
             dut.io_axi_w_payload_last <= ((d + 1) % burstLen == 0)
             await RisingEdge(dut.clk)
             await waitUntil(dut.clk, lambda: (int(dut.io_axi_w_valid) == 1 and int(dut.io_axi_w_ready) == 1))
@@ -76,10 +81,10 @@ async def testFunc(dut):
 
     for i in range(rangeMax):
         dut.io_axi_ar_valid         <= True
-        dut.io_axi_ar_payload_addr  <= i * burstLen
+        dut.io_axi_ar_payload_addr  <= i * burstLen * dataWidthMultipler
         dut.io_axi_ar_payload_id    <= i
         dut.io_axi_ar_payload_len   <= burstLen
-        dut.io_axi_ar_payload_size  <= 1 # 2 bytes/16 bits
+        dut.io_axi_ar_payload_size  <= dataWidthMultipler
         dut.io_axi_ar_payload_burst <= 1 # INCR
         await RisingEdge(dut.clk)
         await waitUntil(dut.clk, lambda: (int(dut.io_axi_ar_valid) == 1 and int(dut.io_axi_ar_ready) == 1))

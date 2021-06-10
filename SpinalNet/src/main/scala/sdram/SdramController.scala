@@ -10,24 +10,27 @@ import spinal.lib.memory.sdram._
 import spinal.lib.memory.sdram.sdr.{MT48LC16M16A2, SdramTimings, SdramInterface}
 
 case class SdramConfig(
-    l: SdramLayout,
     CAS: Int = 3,
     addressWidth: Int = 32,
     burstLen: Int = 16,
+    busDataWidth: Int = 32,
     idWidth: Int = 4
 ) {
-  val busByteSize = l.dataWidth / 8
-  val burstLenWidth = log2Up(burstLen) // 8
+  val busByteSize = busDataWidth / 8
+  val burstLenWidth = 8 // AXI4 burst length width // log2Up(burstLen)
   val burstByteSize = burstLen * busByteSize
   val fullStrbBits = scala.math.pow(2, busByteSize).toInt - 1 // all bits valid
   val bufDepth = burstLen * 4
 
-  require(l.dataWidth % 8 == 0, s"${l.dataWidth} % 8 == 0 assert failed")
-  require(burstLen <= 256, s"$burstLen < 256 assert failed")
+  require(
+    busDataWidth % 8 == 0,
+    s"${busDataWidth} % 8 == 0 bus data width assertaion failed"
+  )
+  require(burstLen <= 256, s"$burstLen < 256 burst lenth assertion failed")
 
   val axiConfig = Axi4Config(
     addressWidth = addressWidth,
-    dataWidth = l.dataWidth,
+    dataWidth = busDataWidth,
     idWidth = idWidth,
     useId = true,
     useQos = false,
@@ -44,6 +47,17 @@ class SdramController(l: SdramLayout, t: SdramTimings, c: SdramConfig)
   require(
     c.burstLen <= l.columnSize,
     "burst length should be less than column size"
+  )
+  require(
+    c.busDataWidth % l.dataWidth == 0,
+    "AXI bus data width is not divisible by SDRAM data width"
+  )
+
+  val DATA_WIDTH_MULIPLER = c.busDataWidth / l.dataWidth
+  val dataWidthMultiplerSet = Set(1, 2, 4, 8, 16, 32, 64, 128, 256)
+  require(
+    dataWidthMultiplerSet(DATA_WIDTH_MULIPLER),
+    "DATA_WIDTH_MULIPLER is not valid"
   )
 
   val CMD_UNSELECTED = B"4'b1000"
@@ -87,15 +101,19 @@ class SdramController(l: SdramLayout, t: SdramTimings, c: SdramConfig)
   val commandReg = Reg(Bits(4 bits)) init (0)
   val addressReg = Reg(UInt(l.chipAddressWidth bits)) init (0)
   val bankAddrReg = Reg(UInt(l.bankWidth bits)) init (0)
-  //val rowAddrReg = Reg(Bits(l.rowWidth bits)) init (0)
   val burstLenReg = Reg(UInt(c.burstLenWidth bits)) init (0)
-  //val strobeReg = Reg(Bits(c.busByteSize bits)) init(0)
-  //val lastWriteReg = Reg(Bool) init(False)
   val columnAddrReg = Reg(UInt(l.columnWidth bits)) init (0)
-  val readDataReg = Reg(Bits(l.dataWidth bits)) init (0)
-  val readDataValidReg = Reg(Bool) init (False)
-  val readDataLastReg = Reg(Bool) init (False)
+  val busReadDataReg = Reg(Bits(c.busDataWidth bits)) init (0)
+  val busReadDataVldReg = Reg(Bool) init (False)
+  val busReadDataLastReg = Reg(Bool) init (False)
   val opIdReg = Reg(UInt(c.idWidth bits)) init (0)
+  val strobeReg = Reg(Bits(c.busByteSize bits)) init (0)
+  val busWriteDataReg = Reg(Bits(c.busDataWidth bits)) init (0)
+  val busDataShiftCnt =
+    Reg(UInt((log2Up(DATA_WIDTH_MULIPLER) + 1) bits)) init (0)
+
+  val writeMask = strobeReg((l.bytePerWord - 1) downto 0)
+  val busWrite = busWriteDataReg((l.dataWidth - 1) downto 0)
   val mask = Bits(l.bytePerWord bits)
 
   awFifo.io.pop.ready := False
@@ -105,11 +123,11 @@ class SdramController(l: SdramLayout, t: SdramTimings, c: SdramConfig)
 
   bFifo.io.push.payload.id := opIdReg
   bFifo.io.push.payload.setOKAY()
-  rFifo.io.push.payload.data := readDataReg
+  rFifo.io.push.payload.data := busReadDataReg
   rFifo.io.push.payload.id := opIdReg
-  rFifo.io.push.payload.last := readDataLastReg
+  rFifo.io.push.payload.last := busReadDataLastReg
   rFifo.io.push.payload.setOKAY()
-  rFifo.io.push.valid := readDataValidReg
+  rFifo.io.push.valid := busReadDataVldReg
 
   io.sdram.BA := bankAddrReg.asBits
   io.sdram.ADDR := addressReg.asBits
@@ -119,11 +137,11 @@ class SdramController(l: SdramLayout, t: SdramTimings, c: SdramConfig)
   io.sdram.RASn := commandReg(2)
   io.sdram.CASn := commandReg(1)
   io.sdram.WEn := commandReg(0)
-  io.sdram.DQ.write := wFifo.io.pop.payload.data
+  io.sdram.DQ.write := busWrite //wFifo.io.pop.payload.data
   io.initDone := False
 
   commandReg := CMD_NOP
-  readDataLastReg := False
+  busReadDataLastReg := False
 
   assert(
     assertion = (columnAddrReg < l.columnSize - c.burstLen),
@@ -134,6 +152,11 @@ class SdramController(l: SdramLayout, t: SdramTimings, c: SdramConfig)
     assertion =
       awFifo.io.pop.payload.isINCR() && arFifo.io.pop.payload.isINCR(),
     message = "only burst type INCR allowed",
+    severity = ERROR
+  )
+  assert(
+    assertion = awFifo.io.pop.payload.len < (256 >> DATA_WIDTH_MULIPLER),
+    message = s"burst length should be less than 256/${DATA_WIDTH_MULIPLER}",
     severity = ERROR
   )
 
@@ -278,7 +301,10 @@ class SdramController(l: SdramLayout, t: SdramTimings, c: SdramConfig)
           .addr((l.columnWidth - 1) downto 0)
           .resized // Colume address
         opIdReg := awFifo.io.pop.payload.id
-        burstLenReg := awFifo.io.pop.payload.len.resized
+
+        burstLenReg := (awFifo.io.pop.payload.len << log2Up(
+          DATA_WIDTH_MULIPLER
+        )).resized
         stateCounter.setTime(t.tRCD)
 
         awFifo.io.pop.ready := True // awFifo.io.pop.valid must be true here
@@ -294,10 +320,29 @@ class SdramController(l: SdramLayout, t: SdramTimings, c: SdramConfig)
         addressReg := columnAddrReg.resized
         commandReg := CMD_WRITE
         stateCounter.setCycles(burstLenReg)
-      } whenIsActive {
-        wFifo.io.pop.ready := True // wFifo.io.pop.valid must be true here
 
-        when(!stateCounter.busy || wFifo.io.pop.payload.last) {
+        strobeReg := wFifo.io.pop.payload.strb
+        busWriteDataReg := wFifo.io.pop.payload.data
+        wFifo.io.pop.ready := True // wFifo.io.pop.valid must be true here
+        busDataShiftCnt := DATA_WIDTH_MULIPLER - 1
+      } whenIsActive {
+        if (DATA_WIDTH_MULIPLER > 1) {
+          strobeReg := (strobeReg >> l.bytePerWord).resized
+          busWriteDataReg := (busWriteDataReg >> l.dataWidth).resized
+          when(busDataShiftCnt > 0) {
+            busDataShiftCnt := busDataShiftCnt - 1
+          } otherwise {
+            strobeReg := wFifo.io.pop.payload.strb
+            busWriteDataReg := wFifo.io.pop.payload.data
+            wFifo.io.pop.ready := True // wFifo.io.pop.valid must be true here
+            busDataShiftCnt := DATA_WIDTH_MULIPLER - 1
+          }
+        } else {
+          busWriteDataReg := wFifo.io.pop.payload.data
+          wFifo.io.pop.ready := stateCounter.busy // wFifo.io.pop.valid must be true here
+        }
+
+        when(!stateCounter.busy) {
           goto(TERM_WRITE)
         }
       }
@@ -307,7 +352,7 @@ class SdramController(l: SdramLayout, t: SdramTimings, c: SdramConfig)
       onEntry {
         commandReg := CMD_BURST_TERMINATE
       } whenIsActive {
-        exit() // Must be one cycle
+        exit() // Must be one cycle, because AXI4 write response will be sent in this cycle right after burst write finish
       } onExit {
         preReqIsWriteReg := True
         bFifo.io.push.valid := True // bFifo.io.push.ready must be true here
@@ -328,7 +373,10 @@ class SdramController(l: SdramLayout, t: SdramTimings, c: SdramConfig)
           .addr((l.columnWidth - 1) downto 0)
           .resized // Colume address
         opIdReg := arFifo.io.pop.payload.id
-        burstLenReg := arFifo.io.pop.payload.len.resized
+
+        burstLenReg := (arFifo.io.pop.payload.len << log2Up(
+          DATA_WIDTH_MULIPLER
+        )).resized
         stateCounter.setTime(t.tRCD)
 
         arFifo.io.pop.ready := True // arFifo.io.pop.valid must be true here
@@ -362,7 +410,7 @@ class SdramController(l: SdramLayout, t: SdramTimings, c: SdramConfig)
         }
       } onExit {
         preReqIsWriteReg := False
-        readDataLastReg := True
+        busReadDataLastReg := True
       }
     }
   }
@@ -421,10 +469,16 @@ class SdramController(l: SdramLayout, t: SdramTimings, c: SdramConfig)
     }
   }
 
+  // assert(
+  //   assertion = writeFsm.isEntering(writeFsm.TERM_WRITE) && wFifo.io.pop.payload.last,
+  //   message = "write burst finish requires AXI AWLAST is true",
+  //   severity = ERROR
+  // )
+
   initPeriod := fsm.isActive(fsm.INIT)
 
   when(writeFsm.isActive(writeFsm.BURST_WRITE)) {
-    mask := DQM_ALL_VALID | ~wFifo.io.push.payload.strb
+    mask := DQM_ALL_VALID | ~writeMask
   } elsewhen (fsm.isActive(fsm.READ)) {
     mask := DQM_ALL_VALID
   } otherwise {
@@ -441,9 +495,34 @@ class SdramController(l: SdramLayout, t: SdramTimings, c: SdramConfig)
   ) {
     val readReg = RegNextWhen(io.sdram.DQ.read, io.sdram.DQ.writeEnable === 0)
   }
-  readDataReg := readArea.readReg
 
-  readDataValidReg := readFsm.isActive(readFsm.BURST_READ)
+  val startBurstReadReg = RegNext(readFsm.isEntering(readFsm.BURST_READ))
+  if (DATA_WIDTH_MULIPLER > 1) {
+    when(startBurstReadReg) {
+      busDataShiftCnt := DATA_WIDTH_MULIPLER - 1
+    }
+
+    busReadDataVldReg := False
+    when(readFsm.isActive(readFsm.BURST_READ)) {
+      // Little Endien
+      busReadDataReg := readArea.readReg ## busReadDataReg(
+        (c.busDataWidth - 1) downto l.dataWidth
+      )
+      // Big Endien
+      // busReadDataReg := busReadDataReg(
+      //   (c.busDataWidth - l.dataWidth - 1) downto 0
+      // ) ## readArea.readReg
+      when(busDataShiftCnt > 0) {
+        busDataShiftCnt := busDataShiftCnt - 1
+      } otherwise {
+        busReadDataVldReg := True
+        busDataShiftCnt := DATA_WIDTH_MULIPLER - 1
+      }
+    }
+  } else {
+    busReadDataReg := readArea.readReg
+    busReadDataVldReg := readFsm.isActive(readFsm.BURST_READ)
+  }
 
   when(!initPeriod && refreshCounter.willOverflow) {
     refreshReqReg := True
@@ -464,7 +543,7 @@ object SdramController {
         new SdramController(
           device.layout,
           device.timingGrade7,
-          SdramConfig(device.layout)
+          SdramConfig()
         )
       )
   }
