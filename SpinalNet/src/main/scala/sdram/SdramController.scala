@@ -175,14 +175,14 @@ class SdramController(l: SdramLayout, t: SdramTimings, c: SdramConfig)
     def setCycles(cycles: BigInt) = {
       assert(
         cycles <= cycleMax && cycles > 0,
-        s"invalid counter cycle: ${cycles}"
+        s"invalid counter cycle=${cycles}, cycleMax=${cycleMax}"
       )
       counter := cycles - 1
     }
     def setCycles(cycles: UInt) = {
       assert(
         cycles <= cycleMax && cycles > 0,
-        s"invalid counter cycle: ${cycles}"
+        s"invalid counter cycle=${cycles}, cycleMax=${cycleMax}"
       )
       counter := (cycles - 1).resized
     }
@@ -192,7 +192,10 @@ class SdramController(l: SdramLayout, t: SdramTimings, c: SdramConfig)
   }
   def timeCounter(timeMax: TimeNumber) = cycleCounter(timeToCycles(timeMax))
 
-  val stateCounter = timeCounter(t.tPOW)
+  val initCounter = timeCounter(t.tPOW)
+  val stateCounter = timeCounter(
+    t.tRFC
+  ) // tRFC is the largest delay except tPOW and tREF
   val refreshCounter = CounterFreeRun(timeToCycles(t.tREF / (1 << l.rowWidth)))
 
   val initPeriod = Bool
@@ -206,9 +209,9 @@ class SdramController(l: SdramLayout, t: SdramTimings, c: SdramConfig)
   val initFsm = new StateMachine {
     val INIT_WAIT: State = new State with EntryPoint {
       onEntry {
-        stateCounter.setTime(t.tPOW)
+        initCounter.setTime(t.tPOW)
       } whenIsActive {
-        when(!stateCounter.busy) {
+        when(!initCounter.busy) {
           goto(INIT_PRECHARGE)
         }
       }
