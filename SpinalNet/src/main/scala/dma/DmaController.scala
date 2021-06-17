@@ -41,7 +41,7 @@ case class DmaConfig(
   )
 }
 
-class Dma(dmaConfig: DmaConfig) extends Component {
+class DmaController(dmaConfig: DmaConfig) extends Component {
   val io = new Bundle {
     val param = slave(Param(dmaConfig.addressWidth, dmaConfig.xySizeWidth))
     val axi = master(Axi4(dmaConfig.axiConfig))
@@ -740,7 +740,7 @@ class DmaWrite(dmaConfig: DmaConfig) extends Component {
   }
 }
 
-object Dma {
+object DmaController {
   def main(args: Array[String]): Unit = {
     val dmaConfig = DmaConfig(
       addressWidth = 16,
@@ -749,6 +749,6 @@ object Dma {
       dataWidth = 8,
       xySizeMax = 256
     )
-    SpinalVerilog(new Dma(dmaConfig)) printPruned ()
+    SpinalVerilog(new DmaController(dmaConfig)) printPruned ()
   }
 }

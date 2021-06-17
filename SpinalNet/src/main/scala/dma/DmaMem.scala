@@ -68,18 +68,18 @@ class DmaMem(
   val dstAddr = DAR_REG.field(addressWidth bits, RW)
 
   val dmaArea = new Area {
-    val dma = new Dma(dmaConfig)
-    dma.io.ctrl <> io.ctrl
+    val dmaController = new DmaController(dmaConfig)
+    dmaController.io.ctrl <> io.ctrl
 
-    dma.io.param.sar := srcAddr.asUInt
-    dma.io.param.dar := dstAddr.asUInt
-    dma.io.param.xsize := 2 * dmaConfig.busByteSize // At least twice bus byte size
-    dma.io.param.ysize := 1
-    dma.io.param.srcystep := 0
-    dma.io.param.dstystep := 0
-    dma.io.param.llr := 0
-    dma.io.param.bf := True
-    dma.io.param.cf := True
+    dmaController.io.param.sar := srcAddr.asUInt
+    dmaController.io.param.dar := dstAddr.asUInt
+    dmaController.io.param.xsize := 2 * dmaConfig.busByteSize // At least twice bus byte size
+    dmaController.io.param.ysize := 1
+    dmaController.io.param.srcystep := 0
+    dmaController.io.param.dstystep := 0
+    dmaController.io.param.llr := 0
+    dmaController.io.param.bf := True
+    dmaController.io.param.cf := True
   }
 
   val sdramArea = new Area {
@@ -91,7 +91,7 @@ class DmaMem(
     io.sdram <> sdramController.io.sdram
   }
 
-  sdramArea.sdramController.io.axi << dmaArea.dma.io.axi
+  sdramArea.sdramController.io.axi << dmaArea.dmaController.io.axi
 }
 
 object DmaMem {

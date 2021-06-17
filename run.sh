@@ -18,7 +18,8 @@ fi
 
 
 # Run test and simulation
-./mill SpinalNet.test.testOnly dma.DmaTest
+./mill SpinalNet.runMain dma.DmaMem
+./mill SpinalNet.test.testOnly dma.DmaControllerTest
 ./mill SpinalNet.test.testOnly sdram.SdramControllerTest
 ./mill SpinalNet.test.testOnly udp.UdpTest
 

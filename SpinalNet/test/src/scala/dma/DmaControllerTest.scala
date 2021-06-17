@@ -8,8 +8,8 @@ import spinal.core.sim._
 import spinal.lib._
 import spinal.sim._
 
-class DmaTest extends AnyFunSuite {
-  test("dma test") {
-    DmaSim.main(null)
+class DmaControllerTest extends AnyFunSuite {
+  test("dma controller test") {
+    DmaControllerSim.main(null)
   }
 }

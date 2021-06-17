@@ -9,7 +9,7 @@ import spinal.lib.sim._
 
 import scala.collection.mutable
 
-object DmaSim extends App {
+object DmaControllerSim extends App {
   val dmaConfig = DmaConfig(
     addressWidth = 32,
     burstLen = 8,
@@ -19,7 +19,7 @@ object DmaSim extends App {
   )
 
   def runDma(
-      dut: Dma,
+      dut: DmaController,
       axiMem: AxiMemorySim,
       sar: Int,
       dar: Int,
@@ -91,7 +91,7 @@ object DmaSim extends App {
   }
 
   SimConfig.withWave
-    .compile(new Dma(dmaConfig))
+    .compile(new DmaController(dmaConfig))
     .doSim { dut =>
       val axiMem = AxiMemorySim(
         dut.io.axi,
