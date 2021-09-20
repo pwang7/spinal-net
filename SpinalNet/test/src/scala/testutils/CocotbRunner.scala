@@ -20,14 +20,14 @@ object CocotbRunner {
       stdout => {
         out = scala.io.Source
           .fromInputStream(stdout)
-          .getLines
+          .getLines()
           .foldLeft("")(_ + "\n" + _)
         stdout.close()
       },
       stderr => {
         err = scala.io.Source
           .fromInputStream(stderr)
-          .getLines
+          .getLines()
           .foldLeft("")(_ + "\n" + _)
         stderr.close()
       }

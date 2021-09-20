@@ -6,7 +6,7 @@ import spinal.core._
 import spinal.core.sim._
 import spinal.lib._
 import spinal.lib.com.eth._
-import spinal.sim._
+import spinal.core.sim._
 
 import testutils.CocotbRunner
 

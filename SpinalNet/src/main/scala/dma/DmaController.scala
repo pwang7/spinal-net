@@ -749,6 +749,6 @@ object DmaController {
       dataWidth = 8,
       xySizeMax = 256
     )
-    SpinalVerilog(new DmaController(dmaConfig)) printPruned ()
+    SpinalVerilog(new DmaController(dmaConfig)).printPruned()
   }
 }

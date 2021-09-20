@@ -36,7 +36,7 @@ case class UdpCtrl(p: MacEthParameter, txCd: ClockDomain, rxCd: ClockDomain)
     //                        withEr = true)
     // )))
     // val phy = master(PhyIo(p.phy))
-    val interrupt = out Bool
+    val interrupt = out Bool ()
   }
 
   val mac = new MacEth(p, txCd, rxCd)
@@ -77,5 +77,5 @@ object UdpCtrl extends App {
       txCd = ClockDomain.external("txClk"),
       rxCd = ClockDomain.external("rxClk")
     )
-  ).printPruned
+  ).printPruned()
 }

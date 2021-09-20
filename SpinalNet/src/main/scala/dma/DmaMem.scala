@@ -99,6 +99,7 @@ object DmaMem {
     SpinalConfig(defaultClockDomainFrequency = FixedFrequency(100 MHz))
       .generateVerilog(
         new DmaMem()
-      ) printPruned ()
+      )
+      .printPruned()
   }
 }

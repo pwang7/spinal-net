@@ -81,7 +81,7 @@ class SdramController(l: SdramLayout, t: SdramTimings, c: SdramConfig)
   val io = new Bundle {
     val axi = slave(Axi4(c.axiConfig))
     val sdram = master(SdramInterface(l)) // setAsReg
-    val initDone = out Bool
+    val initDone = out Bool ()
 
     axi.addAttribute(name = "IOB", value = "TRUE")
     sdram.addAttribute(name = "IOB", value = "TRUE")
